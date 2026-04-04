@@ -1,0 +1,100 @@
+name: Publish Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build package
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    outputs:
+      attestation_artifact_id: ${{ steps.attestations_upload.outputs.artifact-id }}
+      sdist_artifact_id: ${{ steps.sdist_upload.outputs.artifact-id }}
+      wheel_artifact_id: ${{ steps.wheel_upload.outputs.artifact-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Build
+        run: uv build
+
+      - name: Generate checksums
+        working-directory: dist
+        run: |
+          sha256sum * | tee SHA256SUMS
+
+      - name: Generate attestations
+        id: attest
+        uses: actions/attest@v4
+        with:
+          subject-checksums: dist/SHA256SUMS
+
+      - name: Upload attestations bundle
+        id: attestations_upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: attestation.json
+          path: ${{ steps.attest.outputs.bundle-path }}
+          archive: false
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v7
+        with:
+          path: ./dist/SHA256SUMS
+          archive: false
+
+      - name: Upload sdist
+        id: sdist_upload
+        uses: actions/upload-artifact@v7
+        with:
+          path: ./dist/*.tar.gz
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload built wheel
+        id: wheel_upload
+        uses: actions/upload-artifact@v7
+        with:
+          path: ./dist/*.whl
+          archive: false
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Download attestation
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.attestation_artifact_id }}
+
+      - name: Download distributions
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: >-
+            ${{ needs.build.outputs.sdist_artifact_id }},
+            ${{ needs.build.outputs.wheel_artifact_id }}
+          path: dist/
+          merge-multiple: true
+
+      - name: Generate PEP 740 attestation objects
+        run: uv run jack1142-attestation-testing attestation.json dist/*
+
+      - name: Publish
+        run: uv publish --index testpypi
