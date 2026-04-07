@@ -10,5 +10,5 @@ def main() -> None:
         sigstore_bundle = Bundle.from_json(fp.read())
     attestation = Attestation.from_bundle(sigstore_bundle)
     for filename in sys.argv[2:]:
-        with open(f"{filename}.publish.attestation", "w") as fp:
+        with open(f"{filename}.build.attestation", "w") as fp:
             fp.write(attestation.model_dump_json())

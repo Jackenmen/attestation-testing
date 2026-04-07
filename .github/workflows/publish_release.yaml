@@ -43,5 +43,7 @@ jobs:
       - name: Generate PEP 740 attestation for wheel
         run: uv run jack1142-attestation-testing wheel.attestation.json dist/*.whl
 
-      - name: Publish
-        run: uv publish --index testpypi
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@unstable/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
