@@ -1,87 +1,13 @@
 name: Publish Release
 
 on:
-  workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
-  build:
-    name: Build package
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      attestations: write
-      artifact-metadata: write
-    outputs:
-      sdist_attestation_artifact_id: ${{ steps.sdist_attestations_upload.outputs.artifact-id }}
-      wheel_attestation_artifact_id: ${{ steps.wheel_attestations_upload.outputs.artifact-id }}
-      sdist_artifact_id: ${{ steps.sdist_upload.outputs.artifact-id }}
-      wheel_artifact_id: ${{ steps.wheel_upload.outputs.artifact-id }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: Build
-        run: uv build
-
-      - name: Generate attestation for sdist
-        id: sdist_attest
-        uses: actions/attest@v4
-        with:
-          subject-path: dist/*.tar.gz
-
-      - name: Move attestation
-        env:
-          BUNDLE_PATH: ${{ steps.sdist_attest.outputs.bundle-path }}
-        run: mv "$BUNDLE_PATH" sdist.attestation.json
-
-      - name: Upload sdist attestations bundle
-        id: sdist_attestations_upload
-        uses: actions/upload-artifact@v7
-        with:
-          path: sdist.attestation.json
-          archive: false
-
-      - name: Generate attestation for wheel
-        id: wheel_attest
-        uses: actions/attest@v4
-        with:
-          subject-path: dist/*.whl
-
-      - name: Move attestation
-        env:
-          BUNDLE_PATH: ${{ steps.wheel_attest.outputs.bundle-path }}
-        run: mv "$BUNDLE_PATH" wheel.attestation.json
-
-      - name: Upload wheel attestations bundle
-        id: wheel_attestations_upload
-        uses: actions/upload-artifact@v7
-        with:
-          path: wheel.attestation.json
-          archive: false
-
-      - name: Upload sdist
-        id: sdist_upload
-        uses: actions/upload-artifact@v7
-        with:
-          path: ./dist/*.tar.gz
-          archive: false
-          if-no-files-found: error
-
-      - name: Upload built wheel
-        id: wheel_upload
-        uses: actions/upload-artifact@v7
-        with:
-          path: ./dist/*.whl
-          archive: false
-          if-no-files-found: error
-
   publish:
     name: Publish release
     runs-on: ubuntu-latest
-    needs: build
     permissions:
       id-token: write
       contents: read
@@ -91,22 +17,25 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Download attestation
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: >-
-            ${{ needs.build.outputs.sdist_attestation_artifact_id }},
-            ${{ needs.build.outputs.wheel_attestation_artifact_id }}
-          merge-multiple: true
+      - name: Download packaged distributions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          mkdir dist
+          gh release download "$GITHUB_REF_NAME" \
+            -D dist \
+            -p '*.whl' \
+            -p '*.tar.gz'
 
-      - name: Download distributions
-        uses: actions/download-artifact@v8
-        with:
-          artifact-ids: >-
-            ${{ needs.build.outputs.sdist_artifact_id }},
-            ${{ needs.build.outputs.wheel_artifact_id }}
-          path: dist/
-          merge-multiple: true
+      - name: Download attestations
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" \
+            -D . \
+            -p '*.attestation.json'
 
       - name: Generate PEP 740 attestation for sdist
         run: uv run jack1142-attestation-testing sdist.attestation.json dist/*.tar.gz
