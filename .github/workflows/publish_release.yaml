@@ -12,7 +12,8 @@ jobs:
       attestations: write
       artifact-metadata: write
     outputs:
-      attestation_artifact_id: ${{ steps.attestations_upload.outputs.artifact-id }}
+      sdist_attestation_artifact_id: ${{ steps.sdist_attestations_upload.outputs.artifact-id }}
+      wheel_attestation_artifact_id: ${{ steps.wheel_attestations_upload.outputs.artifact-id }}
       sdist_artifact_id: ${{ steps.sdist_upload.outputs.artifact-id }}
       wheel_artifact_id: ${{ steps.wheel_upload.outputs.artifact-id }}
     steps:
@@ -25,29 +26,40 @@ jobs:
       - name: Build
         run: uv build
 
-      - name: Generate checksums
-        working-directory: dist
-        run: |
-          sha256sum * | tee SHA256SUMS
-
-      - name: Generate attestations
-        id: attest
+      - name: Generate attestation for sdist
+        id: sdist_attest
         uses: actions/attest@v4
         with:
-          subject-checksums: dist/SHA256SUMS
+          subject-path: dist/*.tar.gz
 
-      - name: Upload attestations bundle
-        id: attestations_upload
+      - name: Move attestation
+        env:
+          BUNDLE_PATH: ${{ steps.sdist_attest.outputs.bundle-path }}
+        run: mv "$BUNDLE_PATH" sdist.attestation.json
+
+      - name: Upload sdist attestations bundle
+        id: sdist_attestations_upload
         uses: actions/upload-artifact@v7
         with:
-          name: attestation.json
-          path: ${{ steps.attest.outputs.bundle-path }}
+          path: sdist.attestation.json
           archive: false
 
-      - name: Upload checksums
+      - name: Generate attestation for wheel
+        id: wheel_attest
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*.whl
+
+      - name: Move attestation
+        env:
+          BUNDLE_PATH: ${{ steps.wheel_attest.outputs.bundle-path }}
+        run: mv "$BUNDLE_PATH" wheel.attestation.json
+
+      - name: Upload wheel attestations bundle
+        id: wheel_attestations_upload
         uses: actions/upload-artifact@v7
         with:
-          path: ./dist/SHA256SUMS
+          path: wheel.attestation.json
           archive: false
 
       - name: Upload sdist
@@ -82,7 +94,10 @@ jobs:
       - name: Download attestation
         uses: actions/download-artifact@v8
         with:
-          artifact-ids: ${{ needs.build.outputs.attestation_artifact_id }}
+          artifact-ids: >-
+            ${{ needs.build.outputs.sdist_attestation_artifact_id }},
+            ${{ needs.build.outputs.wheel_attestation_artifact_id }}
+          merge-multiple: true
 
       - name: Download distributions
         uses: actions/download-artifact@v8
@@ -93,8 +108,11 @@ jobs:
           path: dist/
           merge-multiple: true
 
-      - name: Generate PEP 740 attestation objects
-        run: uv run jack1142-attestation-testing attestation.json dist/*
+      - name: Generate PEP 740 attestation for sdist
+        run: uv run jack1142-attestation-testing sdist.attestation.json dist/*.tar.gz
+
+      - name: Generate PEP 740 attestation for wheel
+        run: uv run jack1142-attestation-testing wheel.attestation.json dist/*.whl
 
       - name: Publish
         run: uv publish --index testpypi
